@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CRENIGMARE</title>
+<style>
+* { box-sizing: border-box; }
+body { margin:0; background:#0b0913; color:white; font-family:sans-serif; }
+header { padding:25px 8%; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #30233f; }
+.logo { font-size:25px; font-weight:bold; letter-spacing:4px; }
+.menu { color:#bca6d8; font-size:12px; letter-spacing:2px; }
+main { min-height:80vh; padding:65px 20px; text-align:center; background:radial-gradient(ellipse, #392052, #0b0913 70%); }
+h1 { font-size:clamp(32px, 7vw, 60px); }
+.intro { color:#c8bfd4; line-height:2; }
+.game { max-width:600px; margin:45px auto; padding:30px 22px; background:#171326; border:1px solid #62447e; border-radius:8px; }
+.stage { color:#c49bea; letter-spacing:3px; font-size:13px; }
+.question { font-size:19px; line-height:1.9; margin:25px 0; white-space:pre-wrap; }
+.puzzle-image { display:none; max-width:100%; max-height:520px; object-fit:contain; margin:20px auto; border-radius:7px; }
+input { width:100%; padding:15px; background:#0b0913; border:1px solid #8062a0; color:white; font-size:18px; text-align:center; }
+button { margin-top:18px; padding:15px 35px; background:#7543a5; color:white; border:1px solid #c09be9; font-size:15px; cursor:pointer; }
+button:hover { background:#925ac7; }
+#message { min-height:30px; color:#d7b7ff; margin-top:20px; }
+footer { text-align:center; padding:25px; color:#777080; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">CRENIGMARE</div>
+  <div class="menu">THE WORLD OF MYSTERY</div>
+</header>
+<main>
+  <p class="stage">THE WORLD OF MYSTERY</p>
+  <h1>謎を解き、その先へ。</h1>
+  <p class="intro">あなたは、この謎を解き明かせるか。</p>
+
+  <section class="game">
+    <div class="stage" id="stage">STAGE 01</div>
+    <div class="question" id="question"></div>
+    <img id="puzzleImage" class="puzzle-image" alt="謎解き画像">
+    <input id="answer" type="text" placeholder="答えを入力">
+    <button onclick="checkAnswer()">回答する</button>
+    <div id="message"></div>
+  </section>
+</main>
+<footer>© 2026 CRENIGMARE</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="supabase-config.js"></script>
+<script>
+const progressStorageKey = "crenigmareStage";
+let questions = [];
+let currentStage = Math.max(1, Number(localStorage.getItem(progressStorageKey)) || 1);
+
+function showMessage(message) {
+  document.getElementById("message").textContent = message;
+}
+
+function showStage() {
+  const stageElement = document.getElementById("stage");
+  const questionElement = document.getElementById("question");
+  const imageElement = document.getElementById("puzzleImage");
+  const answerElement = document.getElementById("answer");
+  const buttonElement = document.querySelector(".game button");
+
+  answerElement.value = "";
+  showMessage("");
+
+  if (currentStage > questions.length) {
+    stageElement.textContent = "COMPLETE";
+    questionElement.textContent = "全ステージクリア！おめでとう！";
+    imageElement.style.display = "none";
+    imageElement.removeAttribute("src");
+    answerElement.style.display = "none";
+    buttonElement.style.display = "none";
+    return;
+  }
+
+  const item = questions[currentStage - 1];
+  stageElement.textContent = item.stage || `STAGE ${String(currentStage).padStart(2, "0")}`;
+  questionElement.textContent = item.question || "";
+
+  if (item.image_url) {
+    imageElement.src = item.image_url;
+    imageElement.style.display = "block";
+  } else {
+    imageElement.removeAttribute("src");
+    imageElement.style.display = "none";
+  }
+
+  answerElement.style.display = "block";
+  buttonElement.style.display = "inline-block";
+}
+
+async function loadQuestions() {
+  const game = document.querySelector(".game");
+  const answerElement = document.getElementById("answer");
+  const buttonElement = document.querySelector(".game button");
+
+  answerElement.style.display = "none";
+  buttonElement.style.display = "none";
+  document.getElementById("stage").textContent = "LOADING";
+  document.getElementById("question").textContent = "問題を読み込んでいます…";
+
+  if (!window.supabase || typeof supabaseClient === "undefined") {
+    document.getElementById("stage").textContent = "ERROR";
+    document.getElementById("question").textContent =
+      "設定を読み込めません。supabase-config.js の場所を確認してください。";
+    return;
+  }
+
+  const { data, error } = await supabaseClient
+    .from("questions")
+    .select("id, stage, question, answer, image_url")
+    .order("id", { ascending: true });
+
+  if (error) {
+    document.getElementById("stage").textContent = "ERROR";
+    document.getElementById("question").textContent =
+      "問題を読み込めませんでした。時間をおいて再読み込みしてください。";
+    showMessage(error.message);
+    return;
+  }
+
+  questions = Array.isArray(data) ? data : [];
+
+  if (questions.length === 0) {
+    document.getElementById("stage").textContent = "COMING SOON";
+    document.getElementById("question").textContent =
+      "現在、公開されている問題はありません。";
+    return;
+  }
+
+  if (currentStage > questions.length) {
+    currentStage = 1;
+    localStorage.setItem(progressStorageKey, currentStage);
+  }
+
+  showStage();
+}
+
+function checkAnswer() {
+  const answer = document.getElementById("answer").value.trim();
+  const item = questions[currentStage - 1];
+
+  if (!item) return;
+
+  if (answer === String(item.answer || "").trim()) {
+    currentStage++;
+    localStorage.setItem(progressStorageKey, currentStage);
+
+    if (currentStage > questions.length) {
+      showStage();
+    } else {
+      showMessage("正解！次のステージが解放されました！");
+      setTimeout(showStage, 1200);
+    }
+  } else {
+    showMessage("残念！もう一度考えてみよう。");
+  }
+}
+
+loadQuestions();
+</script>
+</body>
+</html>

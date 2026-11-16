@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CRENIGMARE ADMIN</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;padding:25px;background:#100e19;color:white;font-family:sans-serif}
+.container{max-width:750px;margin:auto}
+h1{letter-spacing:3px;color:#d2b2ff}
+p{color:#aaa1bb}
+.panel{background:#201a2c;border:1px solid #55416e;border-radius:10px;padding:22px;margin-top:25px}
+input,textarea{display:block;width:100%;margin:10px 0 18px;padding:13px;background:#100e19;border:1px solid #66517d;border-radius:5px;color:white;font-size:16px}
+textarea{min-height:90px;resize:vertical}
+label{color:#d5c4e8;font-size:14px}
+button{padding:11px 18px;margin:5px 5px 5px 0;border:0;border-radius:5px;background:#7948ad;color:white;cursor:pointer}
+button:hover{background:#9865ca}
+button:disabled{opacity:.55;cursor:not-allowed}
+.delete{background:#8e354c}
+.question{padding:15px;margin-top:12px;background:#171321;border:1px solid #49365f;border-radius:7px}
+.question strong{color:#d2b2ff}
+.small{color:#aaa1bb;font-size:13px}
+.preview,.question-image{display:block;max-width:100%;max-height:260px;object-fit:contain;margin:12px 0;border-radius:6px}
+.preview{display:none;border:1px solid #66517d}
+.hidden{display:none!important}
+#status{white-space:pre-wrap}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>CRENIGMARE</h1>
+<p>ADMINISTRATION PANEL / 問題管理</p>
+
+<section class="panel" id="loginPanel">
+  <h2>管理者ログイン</h2>
+  <label for="email">メールアドレス</label>
+  <input id="email" type="email" autocomplete="username" placeholder="管理者メールアドレス">
+  <label for="password">パスワード</label>
+  <input id="password" type="password" autocomplete="current-password" placeholder="パスワード">
+  <button id="loginButton" type="button">ログイン</button>
+  <p id="loginMessage" class="small" role="status"></p>
+</section>
+
+<div id="adminArea" class="hidden">
+  <div class="panel">
+    <p id="signedInAs" class="small"></p>
+    <button id="logoutButton" type="button">ログアウト</button>
+  </div>
+
+  <div class="panel">
+    <h2 id="formTitle">新しい問題を追加</h2>
+    <label for="stage">ステージ名</label>
+    <input id="stage" placeholder="例：STAGE 03">
+    <label for="question">問題文</label>
+    <textarea id="question" placeholder="問題を入力してください"></textarea>
+    <label for="answer">正解</label>
+    <input id="answer" placeholder="正解を入力してください">
+    <label for="imageFile">謎解き画像（任意）</label>
+    <input id="imageFile" type="file" accept="image/jpeg,image/png,image/webp">
+    <p class="small">JPEG・PNG・WebP、5MB以内の画像を選んでください。</p>
+    <img id="imagePreview" class="preview" alt="選択した画像のプレビュー">
+    <button type="button" id="removeImageButton" class="hidden">画像を外す</button>
+    <button id="saveButton" type="button">保存する</button>
+    <button id="cancelButton" type="button" class="hidden">編集をやめる</button>
+    <p id="formMessage" class="small" role="status"></p>
+  </div>
+
+  <div class="panel">
+    <h2>登録済みの問題</h2>
+    <div id="questionList"></div>
+  </div>
+</div>
+<p id="status" class="small" role="status"></p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="supabase-config.js"></script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const BUCKET = "crenigmare-images";
+  let questions = [];
+  let editingId = null;
+  let selectedFile = null;
+  let removeCurrentImage = false;
+  let currentImageUrl = "";
+
+  function setStatus(message, isError = false) {
+    $("status").textContent = message;
+    $("status").style.color = isError ? "#ff9aa9" : "#aaa1bb";
+  }
+  function setLoginMessage(message, isError = false) {
+    $("loginMessage").textContent = message;
+    $("loginMessage").style.color = isError ? "#ff9aa9" : "#aaa1bb";
+  }
+  function setFormMessage(message, isError = false) {
+    $("formMessage").textContent = message;
+    $("formMessage").style.color = isError ? "#ff9aa9" : "#aaa1bb";
+  }
+  function showLogin() {
+    $("loginPanel").classList.remove("hidden");
+    $("adminArea").classList.add("hidden");
+  }
+  function showAdmin(user) {
+    $("loginPanel").classList.add("hidden");
+    $("adminArea").classList.remove("hidden");
+    $("signedInAs").textContent = "ログイン中：" + (user.email || "管理者");
+  }
+  function requireClient() {
+    if (!window.supabase || typeof supabaseClient === "undefined") {
+      throw new Error("Supabaseの設定を読み込めません。supabase-config.jsとHTMLの配置を確認してください。");
+    }
+    return supabaseClient;
+  }
+
+  async function verifyAdmin() {
+    const client = requireClient();
+    const { data, error } = await client.rpc("is_admin");
+    if (error) throw error;
+    if (data !== true) throw new Error("このアカウントは管理者として登録されていません。");
+  }
+
+  async function loadQuestions() {
+    const client = requireClient();
+    const { data, error } = await client
+      .from("questions")
+      .select("id, stage, question, answer, image_url")
+      .order("id", { ascending: true });
+    if (error) throw error;
+    questions = data || [];
+    renderQuestions();
+  }
+
+  function renderQuestions() {
+    const list = $("questionList");
+    list.replaceChildren();
+    if (!questions.length) {
+      list.textContent = "まだ問題がありません。";
+      return;
+    }
+    questions.forEach(item => {
+      const card = document.createElement("div");
+      card.className = "question";
+      const title = document.createElement("strong");
+      title.textContent = item.stage || "";
+      const body = document.createElement("p");
+      body.textContent = item.question || "";
+      card.append(title, body);
+      if (item.image_url) {
+        const image = document.createElement("img");
+        image.className = "question-image";
+        image.src = item.image_url;
+        image.alt = (item.stage || "問題") + " の謎解き画像";
+        card.appendChild(image);
+      }
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.textContent = "編集";
+      edit.addEventListener("click", () => beginEdit(item.id));
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = "削除";
+      remove.className = "delete";
+      remove.addEventListener("click", () => deleteQuestion(item));
+      card.append(edit, remove);
+      list.appendChild(card);
+    });
+  }
+
+  function showPreview(src) {
+    if (src) {
+      $("imagePreview").src = src;
+      $("imagePreview").style.display = "block";
+      $("removeImageButton").classList.remove("hidden");
+    } else {
+      $("imagePreview").removeAttribute("src");
+      $("imagePreview").style.display = "none";
+      $("removeImageButton").classList.add("hidden");
+    }
+  }
+
+  function resetForm() {
+    editingId = null;
+    selectedFile = null;
+    removeCurrentImage = false;
+    currentImageUrl = "";
+    $("stage").value = "";
+    $("question").value = "";
+    $("answer").value = "";
+    $("imageFile").value = "";
+    $("formTitle").textContent = "新しい問題を追加";
+    $("cancelButton").classList.add("hidden");
+    showPreview("");
+    setFormMessage("");
+  }
+
+  function beginEdit(id) {
+    const item = questions.find(q => q.id === id);
+    if (!item) return;
+    editingId = id;
+    selectedFile = null;
+    removeCurrentImage = false;
+    currentImageUrl = item.image_url || "";
+    $("stage").value = item.stage || "";
+    $("question").value = item.question || "";
+    $("answer").value = item.answer || "";
+    $("imageFile").value = "";
+    $("formTitle").textContent = "問題を編集";
+    $("cancelButton").classList.remove("hidden");
+    showPreview(currentImageUrl);
+    setFormMessage("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function uploadImage(file) {
+    if (!file) return currentImageUrl || null;
+    const allowed = ["image/jpeg", "image/png", "image/webp"];
+    if (!allowed.includes(file.type)) throw new Error("JPEG・PNG・WebP画像を選んでください。");
+    if (file.size > 5 * 1024 * 1024) throw new Error("画像は5MB以内にしてください。");
+    const client = requireClient();
+    const extension = file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg";
+    const path = "questions/" + crypto.randomUUID() + "." + extension;
+    const { error: uploadError } = await client.storage.from(BUCKET).upload(path, file, {
+      contentType: file.type,
+      upsert: false
+    });
+    if (uploadError) throw uploadError;
+    const { data } = client.storage.from(BUCKET).getPublicUrl(path);
+    return data.publicUrl;
+  }
+
+  async function saveQuestion() {
+    const stage = $("stage").value.trim();
+    const question = $("question").value.trim();
+    const answer = $("answer").value.trim();
+    if (!stage || !question || !answer) {
+      setFormMessage("ステージ名・問題文・正解を入力してください。", true);
+      return;
+    }
+    const button = $("saveButton");
+    button.disabled = true;
+    try {
+      const client = requireClient();
+      await verifyAdmin();
+      let imageUrl = removeCurrentImage ? null : currentImageUrl || null;
+      if (selectedFile) imageUrl = await uploadImage(selectedFile);
+      const payload = { stage, question, answer, image_url: imageUrl };
+      let result;
+      if (editingId === null) {
+        result = await client.from("questions").insert(payload);
+      } else {
+        result = await client.from("questions").update(payload).eq("id", editingId);
+      }
+      if (result.error) throw result.error;
+      setFormMessage(editingId === null ? "問題を追加しました！" : "問題を編集しました！");
+      resetForm();
+      await loadQuestions();
+    } catch (error) {
+      setFormMessage("保存できませんでした：" + (error.message || "不明なエラー"), true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function deleteQuestion(item) {
+    if (!confirm("この問題を削除しますか？")) return;
+    try {
+      const client = requireClient();
+      await verifyAdmin();
+      const { error } = await client.from("questions").delete().eq("id", item.id);
+      if (error) throw error;
+      // 問題レコードの削除後、画像ファイルの削除も試みる
+      if (item.image_url) {
+        const marker = "/storage/v1/object/public/" + BUCKET + "/";
+        const position = item.image_url.indexOf(marker);
+        if (position >= 0) {
+          const path = decodeURIComponent(item.image_url.slice(position + marker.length));
+          const { error: storageError } = await client.storage.from(BUCKET).remove([path]);
+          if (storageError) console.warn("画像ファイルの削除に失敗しました", storageError);
+        }
+      }
+      await loadQuestions();
+      setStatus("問題を削除しました。");
+    } catch (error) {
+      setStatus("削除できませんでした：" + (error.message || "不明なエラー"), true);
+    }
+  }
+
+  async function login() {
+    const email = $("email").value.trim();
+    const password = $("password").value;
+    if (!email || !password) {
+      setLoginMessage("メールアドレスとパスワードを入力してください。", true);
+      return;
+    }
+    $("loginButton").disabled = true;
+    try {
+      const client = requireClient();
+      const { data, error } = await client.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      await verifyAdmin();
+      showAdmin(data.user);
+      await loadQuestions();
+      setLoginMessage("");
+      setStatus("管理者としてログインしました。");
+    } catch (error) {
+      const client = window.supabase && typeof supabaseClient !== "undefined" ? supabaseClient : null;
+      if (client) await client.auth.signOut();
+      showLogin();
+      setLoginMessage(error.message || "ログインできませんでした。", true);
+    } finally {
+      $("loginButton").disabled = false;
+    }
+  }
+
+  async function logout() {
+    try {
+      const client = requireClient();
+      const { error } = await client.auth.signOut();
+      if (error) throw error;
+      resetForm();
+      showLogin();
+      setStatus("ログアウトしました。");
+    } catch (error) {
+      setStatus("ログアウトできませんでした：" + (error.message || "不明なエラー"), true);
+    }
+  }
+
+  $("loginButton").addEventListener("click", login);
+  $("logoutButton").addEventListener("click", logout);
+  $("saveButton").addEventListener("click", saveQuestion);
+  $("cancelButton").addEventListener("click", resetForm);
+  $("removeImageButton").addEventListener("click", () => {
+    selectedFile = null;
+    removeCurrentImage = true;
+    currentImageUrl = "";
+    $("imageFile").value = "";
+    showPreview("");
+  });
+  $("imageFile").addEventListener("change", event => {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setFormMessage("JPEG・PNG・WebP画像を選んでください。", true);
+      event.target.value = "";
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setFormMessage("画像は5MB以内にしてください。", true);
+      event.target.value = "";
+      return;
+    }
+    selectedFile = file;
+    removeCurrentImage = false;
+    showPreview(URL.createObjectURL(file));
+    setFormMessage("");
+  });
+
+  async function initialize() {
+    try {
+      const client = requireClient();
+      const { data: { session }, error } = await client.auth.getSession();
+      if (error) throw error;
+      if (!session) {
+        showLogin();
+        return;
+      }
+      await verifyAdmin();
+      showAdmin(session.user);
+      await loadQuestions();
+    } catch (error) {
+      showLogin();
+      setLoginMessage(error.message || "初期化に失敗しました。", true);
+    }
+  }
+  initialize();
+})();
+</script>
+</body>
+</html>

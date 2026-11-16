@@ -48,6 +48,46 @@ footer { text-align:center; padding:25px; color:#777080; }
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="supabase-config.js"></script>
 <script>
+(async function () {
+  try {
+    const { data: { session }, error } =
+      await supabaseClient.auth.getSession();
+
+    if (error || !session) {
+      loadGoogleAnalytics();
+      return;
+    }
+
+    const { data, error: adminError } =
+      await supabaseClient.rpc("is_admin");
+
+    if (adminError || data === true) return;
+
+    loadGoogleAnalytics();
+
+  } catch (error) {
+    console.error("Analytics initialization failed:", error);
+  }
+})();
+
+function loadGoogleAnalytics() {
+  const script = document.createElement("script");
+  script.async = true;
+  script.src =
+    "https://www.googletagmanager.com/gtag/js?id=G-87EENS3XEC";
+  document.head.appendChild(script);
+
+  window.dataLayer = window.dataLayer || [];
+  function gtag() {
+    window.dataLayer.push(arguments);
+  }
+  window.gtag = gtag;
+
+  gtag("js", new Date());
+  gtag("config", "G-87EENS3XEC");
+}
+</script>
+<script>
 const progressStorageKey = "crenigmareStage";
 let questions = [];
 let currentStage = Math.max(1, Number(localStorage.getItem(progressStorageKey)) || 1);

@@ -22,6 +22,8 @@ button { margin-top:18px; padding:15px 35px; background:#7543a5; color:white; bo
 button:hover { background:#925ac7; }
 #message { min-height:30px; color:#d7b7ff; margin-top:20px; }
 footer { text-align:center; padding:25px; color:#777080; }
+#startButton { display:inline-block; }
+#answer, #answerButton { display:none; }
 </style>
 </head>
 <body>
@@ -35,11 +37,12 @@ footer { text-align:center; padding:25px; color:#777080; }
   <p class="intro">あなたは、この謎を解き明かせるか。</p>
 
   <section class="game">
-    <div class="stage" id="stage">STAGE 01</div>
-    <div class="question" id="question"></div>
+    <div class="stage" id="stage">READY</div>
+    <div class="question" id="question">準備ができたら、謎解きを始めよう。</div>
     <img id="puzzleImage" class="puzzle-image" alt="謎解き画像">
+    <button id="startButton" onclick="startGame()">謎解きを始める</button>
     <input id="answer" type="text" placeholder="答えを入力">
-    <button onclick="checkAnswer()">回答する</button>
+    <button id="answerButton" onclick="checkAnswer()">回答する</button>
     <div id="message"></div>
   </section>
 </main>
@@ -53,7 +56,8 @@ footer { text-align:center; padding:25px; color:#777080; }
     const { data: { session }, error } =
       await supabaseClient.auth.getSession();
 
-    if (error || !session) {
+    if (error) return;
+    if (!session) {
       loadGoogleAnalytics();
       return;
     }
@@ -87,10 +91,12 @@ function loadGoogleAnalytics() {
   gtag("config", "G-87EENS3XEC");
 }
 </script>
+
 <script>
 const progressStorageKey = "crenigmareStage";
 let questions = [];
 let currentStage = Math.max(1, Number(localStorage.getItem(progressStorageKey)) || 1);
+let gameStarted = false;
 
 function showMessage(message) {
   document.getElementById("message").textContent = message;
@@ -101,10 +107,12 @@ function showStage() {
   const questionElement = document.getElementById("question");
   const imageElement = document.getElementById("puzzleImage");
   const answerElement = document.getElementById("answer");
-  const buttonElement = document.querySelector(".game button");
+  const answerButton = document.getElementById("answerButton");
+  const startButton = document.getElementById("startButton");
 
   answerElement.value = "";
   showMessage("");
+  startButton.style.display = "none";
 
   if (currentStage > questions.length) {
     stageElement.textContent = "COMPLETE";
@@ -112,7 +120,7 @@ function showStage() {
     imageElement.style.display = "none";
     imageElement.removeAttribute("src");
     answerElement.style.display = "none";
-    buttonElement.style.display = "none";
+    answerButton.style.display = "none";
     return;
   }
 
@@ -129,22 +137,23 @@ function showStage() {
   }
 
   answerElement.style.display = "block";
-  buttonElement.style.display = "inline-block";
+  answerButton.style.display = "inline-block";
 }
 
 async function loadQuestions() {
-  const game = document.querySelector(".game");
-  const answerElement = document.getElementById("answer");
-  const buttonElement = document.querySelector(".game button");
+  const stageElement = document.getElementById("stage");
+  const questionElement = document.getElementById("question");
+  const startButton = document.getElementById("startButton");
 
-  answerElement.style.display = "none";
-  buttonElement.style.display = "none";
-  document.getElementById("stage").textContent = "LOADING";
-  document.getElementById("question").textContent = "問題を読み込んでいます…";
+  startButton.style.display = "none";
+  document.getElementById("answer").style.display = "none";
+  document.getElementById("answerButton").style.display = "none";
+  stageElement.textContent = "LOADING";
+  questionElement.textContent = "問題を読み込んでいます…";
 
   if (!window.supabase || typeof supabaseClient === "undefined") {
-    document.getElementById("stage").textContent = "ERROR";
-    document.getElementById("question").textContent =
+    stageElement.textContent = "ERROR";
+    questionElement.textContent =
       "設定を読み込めません。supabase-config.js の場所を確認してください。";
     return;
   }
@@ -155,8 +164,8 @@ async function loadQuestions() {
     .order("id", { ascending: true });
 
   if (error) {
-    document.getElementById("stage").textContent = "ERROR";
-    document.getElementById("question").textContent =
+    stageElement.textContent = "ERROR";
+    questionElement.textContent =
       "問題を読み込めませんでした。時間をおいて再読み込みしてください。";
     showMessage(error.message);
     return;
@@ -165,9 +174,8 @@ async function loadQuestions() {
   questions = Array.isArray(data) ? data : [];
 
   if (questions.length === 0) {
-    document.getElementById("stage").textContent = "COMING SOON";
-    document.getElementById("question").textContent =
-      "現在、公開されている問題はありません。";
+    stageElement.textContent = "COMING SOON";
+    questionElement.textContent = "現在、公開されている問題はありません。";
     return;
   }
 
@@ -176,10 +184,20 @@ async function loadQuestions() {
     localStorage.setItem(progressStorageKey, currentStage);
   }
 
+  stageElement.textContent = "READY";
+  questionElement.textContent = "準備ができたら、謎解きを始めよう。";
+  startButton.style.display = "inline-block";
+}
+
+function startGame() {
+  if (questions.length === 0) return;
+  gameStarted = true;
   showStage();
 }
 
 function checkAnswer() {
+  if (!gameStarted) return;
+
   const answer = document.getElementById("answer").value.trim();
   const item = questions[currentStage - 1];
 
@@ -202,6 +220,7 @@ function checkAnswer() {
 
 loadQuestions();
 </script>
+
 <footer style="text-align:center; padding:30px 15px; color:#aaa; font-size:13px;">
   <a href="privacy.html" style="color:#b99aff; text-decoration:none;">
     プライバシーポリシー
